@@ -11,13 +11,13 @@
 */
 
 #ifndef STASSID
-#define STASSID "Studiogo-2.4G"
+#define STASSID "playground_luo"
 #define STAPSK "luckyhousepro"
 #endif
 
 
 // Replace with your network credentials
-const char* ssid = "Studiogo-2.4G";
+const char* ssid = "playground_luo";
 const char* password = "luckyhousepro";
 
 // Create AsyncWebServer object on port 80
@@ -35,6 +35,14 @@ unsigned long previousMillis = 0;
 unsigned long interval = 0; // Interval for each step (in milliseconds)
 int step = 0; // Track the current step
 
+// Transition delay in milliseconds
+const unsigned long transitionDelay = 500;
+
+// Global variables to store the last state change times
+unsigned long lastChangedTimeD1 = 0;
+unsigned long lastChangedTimeD2 = 0;
+unsigned long lastChangedTimeD3 = 0;
+unsigned long lastChangedTimeD4 = 0;
 
 void go() {
   unsigned long currentMillis = millis();
@@ -44,10 +52,10 @@ void go() {
     previousMillis = currentMillis;
 
     // Set random interval
-    interval = random(1000, 5000); // Random delay between 1 to 5 seconds
+    interval = random(1000, 3000); // Random delay between 1 to 5 seconds
 
     // Set random movement
-    int randomMovement = random(6); // Generate a random number between 0 to 5
+    int randomMovement = random(0, 3); // Generate a random number between 0 to 5
 
     // Set random speed
     // int randomSpeed = random(250, 250); // Random speed between 50% to 100%
@@ -60,28 +68,16 @@ void go() {
     // Execute the random movement
     switch (randomMovement) {
       case 0:
-        digitalWrite(DA, LOW);
-        digitalWrite(DB, LOW);
+        controlledDigitalWrite(DA, LOW, transitionDelay);
+        controlledDigitalWrite(DB, LOW, transitionDelay);
         break;
       case 1:
-        digitalWrite(DA, HIGH);
-        digitalWrite(DB, LOW);
+        controlledDigitalWrite(DA, HIGH, transitionDelay);
+        controlledDigitalWrite(DB, LOW, transitionDelay);
         break;
       case 2:
-        digitalWrite(DA, HIGH);
-        digitalWrite(DB, HIGH);
-        break;
-      case 3:
-        digitalWrite(DA, LOW);
-        digitalWrite(DB, HIGH);
-        break;
-      case 4:
-        digitalWrite(DA, HIGH);
-        digitalWrite(DB, HIGH);
-        break;
-      case 5:
-        digitalWrite(DA, LOW);
-        digitalWrite(DB, LOW);
+        controlledDigitalWrite(DA, LOW, transitionDelay);
+        controlledDigitalWrite(DB, HIGH, transitionDelay);
         break;
     }
   }
@@ -94,6 +90,44 @@ void stop(){
      
   digitalWrite(PWMB, 0); 
   digitalWrite(DB, LOW);
+}
+
+void controlledDigitalWrite(int pin, int value, unsigned long delayTime)
+{
+  static int lastStateD1 = -1;
+  static int lastStateD2 = -1;
+  static int lastStateD3 = -1;
+  static int lastStateD4 = -1;
+
+  unsigned long* lastChangeTimePtr = nullptr;
+  int* lastStatePtr = nullptr;
+
+  // Assign pointers based on pin number
+  switch (pin)
+  {
+  case D1:
+    lastChangeTimePtr = &lastChangedTimeD1;
+    lastStatePtr = &lastStateD1;
+    break;
+  case D2:
+    lastChangeTimePtr = &lastChangedTimeD2;
+    lastStatePtr = &lastStateD2;
+    break;
+  case D3:
+    lastChangeTimePtr = &lastChangedTimeD3;
+    lastStatePtr = &lastStateD3;
+  case D4:
+    lastChangeTimePtr = &lastChangedTimeD4;
+    lastStatePtr = &lastStateD4;
+    break;
+  }
+  // Check if the required delay time has passed
+  if (lastStatePtr && *lastStatePtr != value && (millis() - *lastChangeTimePtr >= delayTime))
+  {
+    digitalWrite(pin, value); // Change the pin state
+    *lastChangeTimePtr = millis();
+    *lastStatePtr = value; // update the last state
+  }
 }
 
 

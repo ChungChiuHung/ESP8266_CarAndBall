@@ -23,7 +23,7 @@ const char* password = "luckyhousepro";
 AsyncWebServer server(80);
 
 // Set your static IP address
-IPAddress staticIP(192,168,0,108);
+IPAddress staticIP(192,168,0,103);
 // Set your Gateway IP address
 IPAddress gateway(192,168,0,1);
 IPAddress subnet(255,255,255,0);
@@ -34,10 +34,10 @@ IPAddress subnet(255,255,255,0);
 unsigned long previousMillis = 0;
 unsigned long lastOnTime = 0; // Last time the "on" command was received
 unsigned long delayStartTime = 0; // Start time for delay
-const unsigned long delayDuration = 500; // Duration for delay when changing direction
-unsigned long interval = 3000; // Interval between actions within go()
-const unsigned long timeoutDuration  = 30000; //30 seconds timeout
-enum State {WAIT_FOR_TIME, CHANGE_STATE, APPLY_DELAY, CHECK_NEXT};
+const unsigned long delayDuration = 100; // Duration for delay when changing direction
+unsigned long interval = 8000; // Interval between actions within go()
+const unsigned long timeoutDuration  = 180000; //30 seconds timeout
+enum State {WAIT_FOR_TIME, CHANGE_STATE, BOTH_MOTORS_SAME_DIRECTION, APPLY_DELAY, CHECK_NEXT};
 State goState = WAIT_FOR_TIME;
 int step = 0; // Track the current step
 
@@ -52,7 +52,14 @@ int lastDirectionB = -1;
 int lastActiveMotor = 0; // 0 for none, 1 for A, 2 for B
 
 int generateRandomSpeed(){
-  return random(200, 256);
+  return 500;
+}
+
+void stopMotors(){
+  analogWrite(PWMA, 0);
+  analogWrite(PWMB, 0);
+  digitalWrite(DA, LOW);
+  digitalWrite(DB, LOW);
 }
 
 void setup(void) {
@@ -78,15 +85,16 @@ void setup(void) {
   });
 
   server.on("/on", HTTP_GET, [](AsyncWebServerRequest *request){
-    motorState = true;
-    lastOnTime = millis(); // Reset the last "on" time
-    previousMillis = millis(); // Restart timing for the go() function
-    goState = WAIT_FOR_TIME; // Reset the state machine
+    if(!motorState){// Only update if the motor was off
+      motorState = true;
+      lastOnTime = millis(); // Reset the last "on" time
+    }
     request->send(200, "text/plain", "Motor is on and the process restarted");
   });
 
   server.on("/off", HTTP_GET, [](AsyncWebServerRequest *request){
     motorState = false;
+    stopMotors();
     request->send(200, "text/plain", "Motor is off");
   });
 
@@ -98,15 +106,9 @@ void setup(void) {
   pinMode(PWMB, OUTPUT); 
   pinMode(DA, OUTPUT); 
   pinMode(DB, OUTPUT); 
- 	Serial.println("Motor SHield 12E Initialized");
+    Serial.println("Motor SHield 12E Initialized");
 }
 
-void stopMotors(){
-  analogWrite(PWMA, 0);
-  analogWrite(PWMB, 0);
-  digitalWrite(DA, LOW);
-  digitalWrite(DB, LOW);
-}
 
 void activateMotor(int pwmPin, int dirPin, int newDirection, int* lastDirection){
   // First, ensure the other motor is turned off
@@ -183,6 +185,15 @@ void go() {
         lastActiveMotor = 2;
       }
       break;
+    }
+    case BOTH_MOTORS_SAME_DIRECTION:
+    {
+        int direction = random(2); // Same direction for both motors
+        //int speed = generateRandomSpeed();
+        activateMotor(PWMA, DA, direction, &lastDirectionA);
+        activateMotor(PWMB, DB, direction, &lastDirectionB);
+        goState = CHECK_NEXT;
+        break;
     }
     case APPLY_DELAY:
       if(currentMillis - delayStartTime >= delayDuration){

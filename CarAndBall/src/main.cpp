@@ -16,16 +16,16 @@ const int DA=D3;//Right direction control
 const int DB=D4;//Left direction control
 
 // Replace with your network credentials
-const char* ssid = "playground_luo";
-const char* password = "luckyhousepro";
+const char* ssid = "Chung-WiFi";
+const char* password = "037620929";
 
 // Create AsyncWebServer object on port 80
 AsyncWebServer server(80);
 
 // Set your static IP address
-IPAddress staticIP(192,168,0,103);
+IPAddress staticIP(192,168,50,200);
 // Set your Gateway IP address
-IPAddress gateway(192,168,0,1);
+IPAddress gateway(192,168,50,1);
 IPAddress subnet(255,255,255,0);
 
 
@@ -37,22 +37,27 @@ unsigned long delayStartTime = 0; // Start time for delay
 const unsigned long delayDuration = 100; // Duration for delay when changing direction
 unsigned long interval = 8000; // Interval between actions within go()
 const unsigned long timeoutDuration  = 180000; //30 seconds timeout
-enum State {WAIT_FOR_TIME, CHANGE_STATE, BOTH_MOTORS_SAME_DIRECTION, APPLY_DELAY, CHECK_NEXT};
-State goState = WAIT_FOR_TIME;
-int step = 0; // Track the current step
 
 // System state
 bool motorState = false;
 
-// Last direction states
-int lastDirectionA = -1;
-int lastDirectionB = -1;
+enum MotionMode { MOVING_SAME_DIRECTION, 
+                  MOVING_DIFF_DIRECTION,
+                  MOVING_STOP_FOR_FEW_SEC,
+                  MOVING_ONE_MOTOR_RANDOMLY};
 
-// Last active motor
-int lastActiveMotor = 0; // 0 for none, 1 for A, 2 for B
+MotionMode currentMode = MOVING_SAME_DIRECTION;
+
+int speedA, speedB;
+bool directionA, directionB;
+int activeMotor;
 
 int generateRandomSpeed(){
-  return 500;
+  return random(100, 256); // Generate a random speed between 200, 500 
+}
+
+bool generateRandomDirection(){
+  return random(0, 2); // Randomly generate 0 or 1
 }
 
 void stopMotors(){
@@ -60,6 +65,41 @@ void stopMotors(){
   analogWrite(PWMB, 0);
   digitalWrite(DA, LOW);
   digitalWrite(DB, LOW);
+}
+
+void activateMotors(int speedA, bool directionA, int speedB, bool directionB)
+{
+  analogWrite(PWMA, speedA);
+  analogWrite(PWMB, speedB);
+  digitalWrite(DA, directionA ? HIGH : LOW);
+  digitalWrite(DB, directionB ? HIGH : LOW);
+}
+
+void activateSingleMotor(int motor, int speed, bool direction){
+  if(motor == 0){ // Right motor
+    analogWrite(PWMA, speed);
+    digitalWrite(DA, direction ? HIGH : LOW);
+    analogWrite(PWMB, 0);
+    digitalWrite(DB, LOW);
+  }else { // Left motor
+    analogWrite(PWMB, speed);
+    digitalWrite(DB, direction ? HIGH : LOW);
+    analogWrite(PWMA, 0);
+    digitalWrite(DA, LOW);
+  }
+}
+
+MotionMode selectNextMode(){
+  int randValue = random(0, 10); // Adjust the range to set the weight
+  if(randValue<2){
+    return MOVING_SAME_DIRECTION;
+  } else if (randValue < 4){
+    return MOVING_DIFF_DIRECTION;
+  } else if (randValue < 6){
+    return MOVING_STOP_FOR_FEW_SEC;
+  } else {
+    return MOVING_ONE_MOTOR_RANDOMLY;
+  }
 }
 
 void setup(void) {
@@ -109,122 +149,83 @@ void setup(void) {
     Serial.println("Motor SHield 12E Initialized");
 }
 
-
-void activateMotor(int pwmPin, int dirPin, int newDirection, int* lastDirection){
-  // First, ensure the other motor is turned off
-  if(pwmPin == PWMA){
-    // Stop Motor B before starting motor A
-    analogWrite(PWMB, 0);
-    digitalWrite(DB, LOW);
-  }else{
-    // Stop motor A before starting Motor B
-    analogWrite(PWMA, 0);
-    digitalWrite(DA, LOW);
-  }
-
-  int randomSpeed = generateRandomSpeed();
-
-  // Check if the direction needs to change with delay
-  if(newDirection != *lastDirection){
-    delayStartTime = millis();
-    goState = APPLY_DELAY;
-  }else{
-    analogWrite(pwmPin, randomSpeed);
-    digitalWrite(dirPin, newDirection);
-    *lastDirection = newDirection;
-    goState = CHECK_NEXT;
-  }
-}
-
-void applyDelayedChange(){
-  int randomSpeed = generateRandomSpeed();
-
-  if (lastActiveMotor == 1){
-    // Stop Motor B
-    analogWrite(PWMB, 0);
-    digitalWrite(DB, LOW);
-
-    // Start Motor A with new settings
-    analogWrite(PWMA, randomSpeed);
-    digitalWrite(DA, !lastDirectionA);
-    lastDirectionA = !lastDirectionA;
-  } else{
-    // Stop Motor A
-    analogWrite(PWMA, 0);
-    digitalWrite(DA, LOW);
-
-    // Start Motor B with new settings
-    analogWrite(PWMB, randomSpeed);
-    digitalWrite(DB, !lastDirectionB);
-    lastDirectionB = !lastDirectionB;
-  }
-  goState = CHECK_NEXT;
-}
-
 void go() {
   unsigned long currentMillis = millis();
-  switch (goState)
-  {
-    case WAIT_FOR_TIME:
-      if(currentMillis - previousMillis >= interval){
-        previousMillis = currentMillis;
-        goState = CHANGE_STATE;
-      }
-      break;
-    case CHANGE_STATE:
-    {
-      // Randomly choose a motor, ensure it's not the same as last time
-      int selectedMotor = (lastActiveMotor == 1) ? 2:1;
-      int newDirection = random(2);
-      if(selectedMotor == 1)
-      {
-        activateMotor(PWMA, DA, newDirection, &lastDirectionA);
-        lastActiveMotor = 1;
-      } else{
-        activateMotor(PWMB, DB, newDirection, &lastDirectionB);
-        lastActiveMotor = 2;
-      }
-      break;
-    }
-    case BOTH_MOTORS_SAME_DIRECTION:
-    {
-        int direction = random(2); // Same direction for both motors
-        //int speed = generateRandomSpeed();
-        activateMotor(PWMA, DA, direction, &lastDirectionA);
-        activateMotor(PWMB, DB, direction, &lastDirectionB);
-        goState = CHECK_NEXT;
+  static unsigned long modeStartTime = 0;
+  static unsigned long modeDuration = 0;
+
+  // Check if the motors have been running for more than timeoutDuration
+  if (currentMillis - lastOnTime >= timeoutDuration){
+    motorState = false;
+    stopMotors();
+    Serial.println("Motor stopped due to timeout");
+    return;
+  }
+
+  if(currentMillis - modeStartTime >= modeDuration){
+    modeStartTime = currentMillis;
+    modeDuration = random(2000, interval); // Random duration for current mode
+    currentMode = selectNextMode(); // Randomly select next mode with weighted probability
+
+    // Generate random values for speed and direction based on the mode
+    switch (currentMode) {
+      case MOVING_SAME_DIRECTION:
+        {
+        directionA = directionB = generateRandomDirection();
+        speedA = 255;
+        speedB = 255;
+        modeDuration = random(2000,5000); // Force modeDuration to 1~2 seconds
+        break;
+        }
+      case MOVING_DIFF_DIRECTION:
+        directionA = generateRandomDirection();
+        directionB = generateRandomDirection();
+        speedA = generateRandomSpeed();
+        speedB = generateRandomSpeed();
+        modeDuration = random(1000,2000); // Force modeDuration to 1~2 seconds
+        break;
+      case MOVING_STOP_FOR_FEW_SEC:
+        stopMotors();
+        modeDuration = random(1000,1500); // Force modeDuration to 1.5 seconds
+        break;
+      case MOVING_ONE_MOTOR_RANDOMLY:
+        activeMotor = random(0,2); // Randomly select motor 0 or 1
+        if (activeMotor == 0){ // Right motor
+          speedA = random(220,256);
+          directionA = generateRandomDirection();
+        }else { // Left motor
+          speedB = random(220,256);
+          directionB = generateRandomDirection();
+        }
+        modeDuration = random(5000,8000);
         break;
     }
-    case APPLY_DELAY:
-      if(currentMillis - delayStartTime >= delayDuration){
-        // Delay completed, perform the state change
-        applyDelayedChange();
+  }
+
+  // Perform actions based on the current mode
+  switch (currentMode){
+    case MOVING_SAME_DIRECTION:
+      activateMotors(speedA, directionA, speedB, directionB);
+      break;
+    case MOVING_DIFF_DIRECTION:
+      activateMotors(speedA, directionA, speedB, directionB);
+      break;
+    case MOVING_STOP_FOR_FEW_SEC:
+      stopMotors();
+      break;
+    case MOVING_ONE_MOTOR_RANDOMLY:
+      if (activeMotor == 0){ //Right motor
+        activateSingleMotor(0, speedA, directionA);
+      } else {
+        activateSingleMotor(1, speedB, directionB);
       }
       break;
-    case CHECK_NEXT:
-      goState = WAIT_FOR_TIME;
-      break;
-    default:
-      Serial.println("Unhandled state in go()");
-      break;
   }
+
 }
 
-
-
 void loop() {
-  unsigned long currentMillis = millis();
-
-  if (motorState)
-  {
+  if(motorState){
     go();
-    if(currentMillis - lastOnTime > timeoutDuration){
-      motorState = false;
-      stopMotors();
-      Serial.println("Motor stopped due to timeout");
-    }
-  }
-  else{
-    stopMotors();
   }
 }

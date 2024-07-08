@@ -16,16 +16,16 @@ const int DA=D3;//Right direction control
 const int DB=D4;//Left direction control
 
 // Replace with your network credentials
-const char* ssid = "Chung-WiFi";
-const char* password = "037620929";
+const char* ssid = "playground_luo";
+const char* password = "luckyhousepro";
 
 // Create AsyncWebServer object on port 80
 AsyncWebServer server(80);
 
 // Set your static IP address
-IPAddress staticIP(192,168,50,200);
+IPAddress staticIP(192,168,0,103);
 // Set your Gateway IP address
-IPAddress gateway(192,168,50,1);
+IPAddress gateway(192,168,0,1);
 IPAddress subnet(255,255,255,0);
 
 
